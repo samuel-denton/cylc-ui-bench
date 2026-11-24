@@ -1,6 +1,6 @@
 // @vitest-environment node
 // Benchmarks for the workflows store mutations, run inside a cylc-ui checkout.
-// Copied (with deltas.js) into tests/unit/_bench/ by run.sh; configured via env vars.
+// Copied (with deltas.js) into tests/unit/_bench/store/ by the runner; configured via env vars.
 import { appendFileSync } from 'node:fs'
 import { Bench } from 'tinybench'
 import { createStore } from 'vuex'
@@ -121,7 +121,9 @@ it('store benchmarks', async () => {
 
   if (process.env.BENCH_OUT) {
     const meta = {
+      suite: process.env.BENCH_SUITE ?? 'store',
       label: process.env.BENCH_LABEL ?? null,
+      session: process.env.BENCH_SESSION ? Number(process.env.BENCH_SESSION) : null,
       round: process.env.BENCH_ROUND ? Number(process.env.BENCH_ROUND) : null,
       date: new Date().toISOString(),
       node: process.version,

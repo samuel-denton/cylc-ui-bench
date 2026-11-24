@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cylc-ui-bench"
+dynamic = ["version"]
+description = "Benchmark parts of the cylc-ui across multiple branches"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+cylc-ui-bench = "cylc_ui_bench.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "cylc_ui_bench.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["cylc_ui_bench*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.html", "*.js"]
