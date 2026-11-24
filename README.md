@@ -36,10 +36,32 @@ nohup cylc-ui-bench run -C ~/cylc-ui -n 4 -d 30 --scale 10x500x2 --scale 2x2500x
 
 # re-summarise a run, or compare several
 cylc-ui-bench report results/20261124-141500
+
+# or do it all from a web GUI
+cylc-ui-bench gui -C ~/cylc-ui
 ```
 
 Run `cylc-ui-bench run -h` for all options. With no refs, `master HEAD` is
 compared.
+
+## GUI
+
+`cylc-ui-bench gui` serves a web page for starting runs and browsing results,
+and opens it in your browser:
+
+- **New run**: choose refs (with autocomplete from the cylc-ui checkout),
+  suites, scales, rounds, iterations, sessions and delay, then start the run.
+- **Runs**: every run in the results directory, including ones started from
+  the command line, with live progress, the log, the summary and the report.
+  A run in progress can be stopped.
+
+Runs are started as separate processes, so they carry on if the GUI is closed
+or stopped. Only one run can be in progress at a time, as concurrent runs
+would skew each other's timings.
+
+The server listens on 127.0.0.1 only, and every request needs the access token
+in the printed URL (kept in a cookie after the first visit), so other users of
+a shared machine can't use it. Use `-p PORT` for a fixed port.
 
 ## Options
 
@@ -117,6 +139,8 @@ cylc_ui_bench/
   summarise.py      summary tables
   report.py         writes summaries and report.html
   viewer.html       the HTML report viewer
+  server.py         the GUI's web server and API
+  gui/              the GUI (Vue 3, no build step; Vue is vendored in gui/vendor/, MIT licence)
   suites/           benchmark suites copied into cylc-ui worktrees
 results/            output (not tracked)
 ```

@@ -54,6 +54,8 @@ class Config:
     fetch: bool = False
     keep: bool = False
     results_dir: Optional[str] = None
+    #: use this (new or empty) directory rather than creating one in results_dir
+    run_dir: Optional[str] = None
 
 
 def default_results_dir() -> Path:
@@ -101,7 +103,7 @@ def _write_json(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
-def _make_run_dir(base: Path) -> Path:
+def make_run_dir(base: Path) -> Path:
     base.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     for n in range(100):
@@ -135,7 +137,7 @@ def _run_command(cmd: List[str], cwd: Path, env: Dict[str, str], log) -> int:
         raise
 
 
-def _raise_interrupt(signum, frame):
+def raise_interrupt(signum, frame):
     raise KeyboardInterrupt
 
 
@@ -246,7 +248,11 @@ class Runner:
         self.resolve_refs()
 
         c = self.config
-        self.run_dir = _make_run_dir(Path(c.results_dir or default_results_dir()).expanduser())
+        if c.run_dir:
+            self.run_dir = Path(c.run_dir).expanduser()
+            self.run_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            self.run_dir = make_run_dir(Path(c.results_dir or default_results_dir()).expanduser())
         self.results_path = self.run_dir / 'results.jsonl'
         self.log_path = self.run_dir / 'run.log'
         jobs = [
@@ -276,7 +282,7 @@ class Runner:
         self.log(f'cylc-ui: {self.repo}')
         self.log(f"refs: {', '.join(r['label'] for r in self.refs)}")
 
-        previous = signal.signal(signal.SIGTERM, _raise_interrupt)
+        previous = signal.signal(signal.SIGTERM, raise_interrupt)
         state = 'done'
         try:
             self.create_worktrees()

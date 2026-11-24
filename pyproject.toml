@@ -20,4 +20,5 @@ version = { attr = "cylc_ui_bench.__version__" }
 include = ["cylc_ui_bench*"]
 
 [tool.setuptools.package-data]
-"*" = ["*.html", "*.js"]
+"*" = ["*.html", "*.js", "*.css", "LICENSE*"]
+cylc_ui_bench = ["gui/*.*", "gui/components/*.js", "gui/vendor/*"]

@@ -1,4 +1,4 @@
-"""Command line interface: cylc-ui-bench run|report."""
+"""Command line interface: cylc-ui-bench run|report|gui."""
 from __future__ import annotations
 
 import argparse
@@ -96,6 +96,8 @@ def build_parser() -> argparse.ArgumentParser:
         help='where to create the run directory'
              ' (default: $BENCH_RESULTS, else results/ in this tool)',
     )
+    # used by the GUI, which creates the run directory itself
+    run.add_argument('--run-dir', help=argparse.SUPPRESS)
 
     report = sub.add_parser(
         'report',
@@ -114,6 +116,25 @@ def build_parser() -> argparse.ArgumentParser:
         help='per-run statistic to compare (default: p50)',
     )
     report.add_argument('--markdown', action='store_true', help='print markdown')
+
+    gui = sub.add_parser(
+        'gui',
+        help='web GUI to start runs and view results',
+        description=(
+            'Serve a web GUI on 127.0.0.1 to configure and start runs and to'
+            ' browse results, and open it in a browser. The URL includes an'
+            ' access token, so only you can use it.'
+        ),
+    )
+    gui.add_argument('-C', '--cylc-ui', metavar='DIR', help='cylc-ui checkout (as for run)')
+    gui.add_argument(
+        '-o', '--results-dir', metavar='DIR',
+        help='results directory (default: $BENCH_RESULTS, else results/ in this tool)',
+    )
+    gui.add_argument(
+        '-p', '--port', type=int, default=0,
+        help='port to listen on (default: any free port)',
+    )
     return parser
 
 
@@ -132,6 +153,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         fetch=args.fetch,
         keep=args.keep,
         results_dir=args.results_dir,
+        run_dir=args.run_dir,
     )
     return run(config)
 
@@ -157,10 +179,15 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_gui(args: argparse.Namespace) -> int:
+    from .server import serve
+    return serve(args.cylc_ui, args.results_dir, args.port)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        return {'run': cmd_run, 'report': cmd_report}[args.command](args)
+        return {'run': cmd_run, 'report': cmd_report, 'gui': cmd_gui}[args.command](args)
     except KeyboardInterrupt:
         return 130
 
