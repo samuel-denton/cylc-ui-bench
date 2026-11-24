@@ -149,6 +149,33 @@ export function makeWorkflow ({
     return delta
   }
 
+  // Graph edges (only included in deltas on request, so as not to change the
+  // workload of suites that don't use them). In each cycle the tasks form
+  // layers about sqrt(tasks) wide: each task depends on one in the previous
+  // layer and every third on a second, and task_0 depends on task_0 in the
+  // previous cycle.
+  const width = Math.max(1, Math.round(Math.sqrt(tasksPerCycle)))
+  const edge = (sourceCycle, source, targetCycle, target) => ({
+    __typename: 'Edge',
+    id: `${workflowID}//$edge|${sourceCycle}/task_${source}|${targetCycle}/task_${target}`,
+    source: id(sourceCycle, `task_${source}`),
+    target: id(targetCycle, `task_${target}`),
+  })
+
+  /** Edges within, and between, the given cycles. */
+  function edges (cycles = cyclePoints) {
+    const ret = []
+    cycles.forEach((cycle, c) => {
+      if (c > 0 && tasksPerCycle) ret.push(edge(cycles[c - 1], 0, cycle, 0))
+      for (let i = width; i < tasksPerCycle; i++) {
+        const previousLayer = i - (i % width) - width
+        ret.push(edge(cycle, previousLayer + (i % width), cycle, i))
+        if (width > 1 && i % 3 === 0) ret.push(edge(cycle, previousLayer + ((i + 1) % width), cycle, i))
+      }
+    })
+    return ret
+  }
+
   return {
     workflowID,
     cyclePoints,
@@ -161,5 +188,6 @@ export function makeWorkflow ({
     added,
     updated,
     pruned,
+    edges,
   }
 }

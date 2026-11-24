@@ -66,7 +66,7 @@ defineBench('store', async () => {
             const s = populated()
             gc()
             const after = process.memoryUsage().heapUsed
-            s.state.toString()  // keep s alive until measured
+            s.state.toString() // keep s alive until measured
             return after - before
           },
         }

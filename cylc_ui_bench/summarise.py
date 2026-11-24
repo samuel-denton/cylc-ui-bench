@@ -122,6 +122,8 @@ def _group(runs, stat, printer):
             f"{suite}: {counts['tasks']} tasks, {counts['jobs']} jobs,"
             f" {counts['families']} families, {counts['cycles']} cycles"
         )
+        if 'edges' in counts:
+            heading += f", {counts['edges']} edges"
     elif meta.get('scaleName') not in (None, 'default'):
         heading = f"{suite}: scale {meta['scaleName']}"
     else:

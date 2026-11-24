@@ -110,7 +110,7 @@ export function memoryScenarios ({ newStore, mountIt, cycles = 3, iterations = 3
       // ~0 normally, so ratios between refs would just be noise
       ratio: false,
       async measure () {
-        await cycle()  // so one-off module/cache allocations aren't counted
+        await cycle() // so one-off module/cache allocations aren't counted
         const before = await settledHeapUsed()
         for (let i = 0; i < cycles; i++) await cycle()
         return await settledHeapUsed() - before

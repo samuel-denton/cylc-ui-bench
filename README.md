@@ -9,6 +9,11 @@ Suites:
 |---|---|
 | `store` | workflows Vuex store mutations (initial load, spawning/pruning a cycle, updating every node, removing a workflow) and the memory a loaded store retains |
 | `tree` | Tree view rendering in happy-dom: mounting (every cycle, family and task), expanding tasks to show jobs, updating every node, filtering by ID; and the memory a mounted view uses and any retained after unmounting |
+| `graph` | Graph view layout, using the view's own methods: generating the Graphviz dot code, and laying out (dot code, Graphviz and processing the result) top-bottom, left-right and grouped by cycle. Not rendering: nodes are given a fixed size, as happy-dom can't measure SVG |
+
+The synthetic workflow's graph (used by `graph`) is layered within each cycle,
+about sqrt(tasks) wide, with ~1.3 edges per task and an edge between
+consecutive cycles.
 
 Render suites (e.g. `tree`) mount the real views with Vuetify, the Vuex store
 and the `WorkflowService`'s subscription handling (with no network), in

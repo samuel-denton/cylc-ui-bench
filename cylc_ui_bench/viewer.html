@@ -122,6 +122,7 @@ function renderGroup (group, stat) {
   let heading = esc(suite)
   if (counts) {
     heading += `: ${counts.tasks} tasks, ${counts.jobs} jobs, ${counts.families} families, ${counts.cycles} cycles`
+    if (counts.edges !== undefined) heading += `, ${counts.edges} edges`
   } else if (scaleName && scaleName !== 'default') {
     heading += `: scale ${esc(scaleName)}`
   }
