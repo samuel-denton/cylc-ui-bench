@@ -220,9 +220,11 @@ class Results:
             cmd = [
                 sys.executable, '-m', 'cylc_ui_bench.cli', 'run',
                 '--run-dir', str(run_dir), '-C', str(runner.repo),
-                '-r', str(config.rounds), '-i', str(config.iterations),
+                '-r', str(config.rounds),
                 '-n', str(config.sessions), '-d', str(config.delay),
             ]
+            if config.iterations:
+                cmd += ['-i', str(config.iterations)]
             for suite in config.suites:
                 cmd += ['-s', suite]
             for scale in config.scales:
@@ -261,8 +263,10 @@ class Results:
 def config_from_request(body: dict, cylc_ui: Path) -> Config:
     defaults = Config()
 
-    def number(name, kind=int):
+    def number(name, kind=int, optional=False):
         value = body.get(name, getattr(defaults, name))
+        if optional and value is None:
+            return None
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise RunError(f'{name} must be a number')
         if kind is int and value != int(value):
@@ -288,7 +292,7 @@ def config_from_request(body: dict, cylc_ui: Path) -> Config:
         suites=strings('suites', defaults.suites) or defaults.suites,
         scales=strings('scales', []),
         rounds=number('rounds'),
-        iterations=number('iterations'),
+        iterations=number('iterations', optional=True),
         sessions=number('sessions'),
         delay=number('delay', float),
         only=only,
@@ -335,6 +339,7 @@ class GuiServer(ThreadingHTTPServer):
                     'scaled': s.scaled,
                     'default_scales': list(s.default_scales),
                     'scale_help': s.scale_help,
+                    'default_iterations': s.default_iterations,
                 }
                 for s in SUITES.values()
             ],

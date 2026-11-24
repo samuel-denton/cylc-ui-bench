@@ -14,7 +14,7 @@ export default {
       suites: [],
       scales: '',
       rounds: 3,
-      iterations: 20,
+      iterations: null,
       sessions: 1,
       delay: 30,
       only: '',
@@ -65,7 +65,7 @@ export default {
           suites: form.suites,
           scales: scales.value,
           rounds: form.rounds,
-          iterations: form.iterations,
+          iterations: form.iterations || null,
           sessions: form.sessions,
           delay: form.delay,
           only: form.only || null,
@@ -79,7 +79,10 @@ export default {
       }
     }
 
-    return { form, error, submitting, runCount, refs, move, submit }
+    const iterationsHelp = computed(() => 'Default per suite: ' +
+      (props.options?.suites ?? []).map((s) => `${s.name} ${s.default_iterations}`).join(', '))
+
+    return { form, error, submitting, runCount, refs, iterationsHelp, move, submit }
   },
   template: `
     <form @submit.prevent="submit">
@@ -121,7 +124,7 @@ export default {
 
         <div class="field numbers">
           <label>Rounds<br><input type="number" min="1" v-model.number="form.rounds"></label>
-          <label>Iterations<br><input type="number" min="1" v-model.number="form.iterations"></label>
+          <label>Iterations<br><input type="number" min="1" v-model.number="form.iterations" placeholder="default" :title="iterationsHelp"></label>
           <label>Sessions<br><input type="number" min="1" v-model.number="form.sessions"></label>
           <label>Delay (min)<br><input type="number" min="0" v-model.number="form.delay" :disabled="form.sessions < 2"></label>
           <label>Only scenarios (regex)<br><input v-model="form.only" placeholder="all" style="width: 12em"></label>

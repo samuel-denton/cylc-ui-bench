@@ -23,7 +23,7 @@ import inspect
 import pkgutil
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 COMMON_DIR = Path(__file__).parent / '_common'
 WORKFLOW_SCALE_HELP = 'CYCLESxTASKSxJOBS, e.g. 10x500x2 (tasks per cycle, jobs per task)'
@@ -51,6 +51,11 @@ class Suite:
     #: scales to run when none are given
     default_scales = ('10x500x2',)
     scale_help = WORKFLOW_SCALE_HELP
+    #: timed iterations per scenario when --iterations isn't given
+    default_iterations = 20
+    #: extra arguments for vitest, e.g. ('--pool=forks',) for suites that
+    #: need a separate process (heavy rendering, clear out-of-memory errors)
+    vitest_args: Tuple[str, ...] = ()
 
     @property
     def path(self) -> Path:
@@ -71,7 +76,7 @@ class Suite:
 
     def command(self) -> List[str]:
         """Command to run the suite from the worktree root."""
-        return ['npx', 'vitest', 'run', f'{self.target()}/', '--silent=false']
+        return ['npx', 'vitest', 'run', f'{self.target()}/', '--silent=false', *self.vitest_args]
 
     def collect(self, worktree: Path, output: str, elapsed: float) -> Optional[List[dict]]:
         """Results for a command suite, from its output and elapsed time (s).

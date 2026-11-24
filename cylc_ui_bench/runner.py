@@ -47,7 +47,8 @@ class Config:
     suites: List[str] = field(default_factory=lambda: list(SUITES))
     scales: List[str] = field(default_factory=list)
     rounds: int = 3
-    iterations: int = 20
+    #: None for each suite's default
+    iterations: Optional[int] = None
     sessions: int = 1
     delay: float = 30
     only: Optional[str] = None
@@ -180,7 +181,8 @@ class Runner:
                     raise RunError(f'{suite.name}: {exc}') from None
             self.scales[suite.name] = scales
         for name in ('rounds', 'iterations', 'sessions'):
-            if getattr(c, name) < 1:
+            value = getattr(c, name)
+            if value is not None and value < 1:
                 raise RunError(f'{name} must be at least 1')
         if c.delay < 0:
             raise RunError('delay must not be negative')
@@ -359,7 +361,7 @@ class Runner:
                 'BENCH_LABEL': ref['label'],
                 'BENCH_SESSION': str(session),
                 'BENCH_ROUND': str(round_),
-                'BENCH_ITERATIONS': str(c.iterations),
+                'BENCH_ITERATIONS': str(c.iterations or suite.default_iterations),
                 'BENCH_OUT': str(self.results_path),
             }
             if c.only:

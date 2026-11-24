@@ -58,7 +58,7 @@ export default {
           <template v-if="!run.legacy">
             <dt>Scales</dt><dd>{{ Object.entries(run.scales).map(([s, x]) => s + ': ' + x.join(' ')).join('; ') }}</dd>
             <dt>Settings</dt>
-            <dd>{{ run.rounds }} rounds × {{ run.sessions }} sessions<span v-if="run.sessions > 1">, {{ run.delay }} min apart</span>, {{ run.iterations }} iterations<span v-if="run.only">, only /{{ run.only }}/</span></dd>
+            <dd>{{ run.rounds }} rounds × {{ run.sessions }} sessions<span v-if="run.sessions > 1">, {{ run.delay }} min apart</span>, {{ run.iterations ?? 'default' }} iterations<span v-if="run.only">, only /{{ run.only }}/</span></dd>
           </template>
           <dt>Started</dt><dd>{{ fmtDate(run.started) }}</dd>
           <dt v-if="run.finished">Finished</dt><dd v-if="run.finished">{{ fmtDate(run.finished) }}</dd>

@@ -8,6 +8,14 @@ Suites:
 | Suite | What it measures |
 |---|---|
 | `store` | workflows Vuex store mutations (initial load, spawning/pruning a cycle, updating every node, removing a workflow) and the memory a loaded store retains |
+| `tree` | Tree view rendering in happy-dom: mounting (every cycle, family and task), expanding tasks to show jobs, updating every node, filtering by ID; and the memory a mounted view uses and any retained after unmounting |
+
+Render suites (e.g. `tree`) mount the real views with Vuetify, the Vuex store
+and the `WorkflowService`'s subscription handling (with no network), in
+[happy-dom](https://github.com/capricorn86/happy-dom). Their timings cover Vue,
+Vuetify and DOM work but not browser layout or paint, and their memory figures
+are inflated by happy-dom's DOM, so they are for comparing refs rather than
+absolute numbers.
 
 Suites marked as scaled run against a synthetic workflow of configurable size
 (`CYCLESxTASKSxJOBS`, e.g. `10x500x2`).
@@ -79,7 +87,7 @@ The main options of `cylc-ui-bench run`:
 | `-s SUITE` | all | suite to run (repeatable) |
 | `--scale SCALE` | suite's default | workload size (repeatable), e.g. `10x500x2` for `store` |
 | `-r N` | 3 | rounds per session, per scale |
-| `-i N` | 20 | timed iterations per scenario, per round |
+| `-i N` | per suite (`run -h`) | timed iterations per scenario, per round |
 | `-n N` | 1 | sessions |
 | `-d MINUTES` | 30 | wait between sessions |
 | `--only REGEX` | | only run scenarios matching REGEX |
@@ -100,7 +108,8 @@ Environment variables:
    worktree (detached, so your checkout is untouched), with `node_modules`
    symlinked from the main checkout. These are reused for the whole run.
    Note that every ref runs with the main checkout's dependencies; a warning
-   is logged if a ref's `yarn.lock` differs.
+   is logged if a ref's `yarn.lock` differs, and refs whose test setup needs
+   other dependencies (e.g. year-old ones expecting jsdom) fail to run.
 2. `suites/_common/` and each suite's files are copied into
    `tests/unit/_bench/` of each worktree. Vitest suites are run with vitest,
    using a production Vue build and `--expose-gc`; command suites run their
@@ -148,9 +157,16 @@ class TreeSuite(Suite):
     description = 'Tree view rendering'
 ```
 
+Optional attributes: `scaled = False` for suites that don't use the workflow
+scale, `default_iterations` (20 by default; lower for slow suites), and
+`vitest_args`, e.g. `('--pool=forks',)` for suites that render (a separate
+process, which also reports running out of memory clearly).
+
 For a **vitest suite** (the default), add `*.bench.spec.js` files alongside it.
-They are copied into `tests/unit/_bench/<name>/` and can import
-`../_common/harness.js` and `../_common/workflow.js` (see
+They are copied into `tests/unit/_bench/<name>/` and can import from
+`../_common/`: `harness.js` (defining benchmarks), `workflow.js` (synthetic
+workflow deltas) and `render.js` (mounting views, and standard memory
+scenarios; see `suites/tree/tree.bench.spec.js`). For example (see also
 `suites/store/store.bench.spec.js`):
 
 ```js
@@ -169,15 +185,20 @@ defineBench('tree', async () => {
       'timed thing': mod ? { fn: () => mod.thing(), beforeEach () { /* untimed setup */ } }
                          : { skip: 'no @/some/module' },
       'memory thing': { unit: 'bytes', measure: () => 123 },
+      // ratio: false where ratios between refs would be noise (e.g. values ~0)
     },
   }
 })
 ```
 
-For a **command suite**, set `scaled = False` if it doesn't use the workflow
-scale, and override `command()` to return the command to run in the worktree
-and `collect(worktree, output, elapsed)` to return its results, as a list of
-`{"name", "unit", "state", "p50", ...}` dicts.
+Mounting views in tests: don't use sinon stubs for services the views call
+(e.g. `$workflowService`). Sinon keeps every stub and its calls in a global
+sandbox, so each mounted view stays in memory and large benchmarks run out of
+it. `render.js` provides suitable fakes.
+
+For a **command suite**, override `command()` to return the command to run in
+the worktree and `collect(worktree, output, elapsed)` to return its results,
+as a list of `{"name", "unit", "state", "p50", ...}` dicts.
 
 ## Layout
 
@@ -192,6 +213,6 @@ cylc_ui_bench/
   server.py         the GUI's web server and API
   gui/              the GUI (Vue 3, no build step; Vue is vendored in gui/vendor/, MIT licence)
   suites/           benchmark suites copied into cylc-ui worktrees
-    _common/        harness.js and workflow.js, shared by all suites
+    _common/        harness.js, workflow.js and render.js, shared by the suites
 results/            output (not tracked)
 ```

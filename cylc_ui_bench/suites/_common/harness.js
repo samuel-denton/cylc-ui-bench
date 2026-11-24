@@ -3,8 +3,11 @@
 // A suite's spec calls defineBench() with a setup function returning its
 // scenarios. Each scenario is one of:
 //   { fn, beforeAll?, beforeEach?, afterEach?, afterAll? }  timed with tinybench (ms)
-//   { measure: async () => number, unit }                   a measured value, e.g. bytes
+//   { measure: async () => number, unit, iterations? }      a measured value, e.g. bytes,
+//                                                           repeated at most `iterations` times
 //   { skip: 'reason' }                                      not applicable to this ref
+// Add `ratio: false` to a scenario whose values aren't meaningful as ratios
+// between refs (e.g. ones that are normally ~0).
 // Setup should import cylc-ui code dynamically (see tryImport), so a ref that
 // lacks it skips the affected scenarios rather than failing the whole suite.
 //
@@ -110,7 +113,8 @@ async function timed (name, scenario) {
 async function measured (scenario) {
   try {
     const values = []
-    for (let i = 0; i < ITERATIONS; i++) values.push(await scenario.measure())
+    const iterations = Math.min(scenario.iterations ?? ITERATIONS, ITERATIONS)
+    for (let i = 0; i < iterations; i++) values.push(await scenario.measure())
     return { state: 'completed', ...stats(values) }
   } catch (err) {
     return { state: 'errored', error: String(err?.stack ?? err) }
@@ -126,12 +130,13 @@ function fmt (value, unit) {
 /**
  * Register a vitest test that runs a suite's scenarios and records the results.
  *
- * setup() returns { scenarios, params?, counts? }: params and counts describe
- * the workload and go in the results' meta.
+ * setup() returns { scenarios, params?, counts?, info? }: params and counts
+ * describe the workload, and info anything else worth recording; all go in
+ * the results' meta.
  */
 export function defineBench (suite, setup) {
   it(`${suite} benchmarks`, async () => {
-    const { scenarios, params = null, counts = null } = await setup()
+    const { scenarios, params = null, counts = null, info = null } = await setup()
     const results = []
     for (const [name, scenario] of Object.entries(scenarios)) {
       if (ONLY && !ONLY.test(name)) continue
@@ -144,7 +149,7 @@ export function defineBench (suite, setup) {
       } else {
         result = await timed(name, scenario)
       }
-      results.push({ name, unit, ...result })
+      results.push({ name, unit, ...(scenario.ratio === false && { ratio: false }), ...result })
     }
 
     console.table(Object.fromEntries(results.map((r) => [r.name, {
@@ -176,6 +181,7 @@ export function defineBench (suite, setup) {
         scaleName: process.env.BENCH_SCALE ?? null,
         scale: params,
         counts,
+        info,
       }
       appendFileSync(process.env.BENCH_OUT, JSON.stringify({ meta, results }) + '\n')
     }

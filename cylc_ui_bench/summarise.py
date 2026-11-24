@@ -82,12 +82,15 @@ def _group(runs, stat, printer):
     labels = list(dict.fromkeys(r['meta']['label'] for r in runs))
     scenarios = list(dict.fromkeys(res['name'] for r in runs for res in r['results']))
     units = {}
+    no_ratio = set()
     values = defaultdict(list)
     states = defaultdict(set)
     for r in runs:
         for res in r['results']:
             key = res['name'], r['meta']['label']
             units.setdefault(res['name'], res.get('unit', 'ms'))
+            if res.get('ratio') is False:
+                no_ratio.add(res['name'])
             states[key].add(res['state'])
             if res['state'] == 'completed':
                 values[key].append(res[stat])
@@ -105,7 +108,7 @@ def _group(runs, stat, printer):
                 continue
             median = statistics.median(xs)
             base = cells[0][0] if cells and isinstance(cells[0], tuple) else None
-            ratio = base / median if base and median else None
+            ratio = base / median if base and median and scenario not in no_ratio else None
             cells.append((median, min(xs), max(xs), len(xs), ratio))
         medians = [c[0] for c in cells if isinstance(c, tuple)]
         divisor, suffix = scale_unit(units[scenario], medians[0] if medians else 0)

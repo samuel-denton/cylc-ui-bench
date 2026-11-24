@@ -42,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     def describe(s):
         scale = f'scale: {s.scale_help}' if s.scaled else '(not scaled)'
-        return f'  {s.name:<10} {s.description}\n  {"":<10} {scale}'
+        return f'  {s.name:<10} {s.description}\n  {"":<10} {scale}; {s.default_iterations} iterations'
 
     suites = '\n'.join(describe(s) for s in SUITES.values())
     run = sub.add_parser(
@@ -78,8 +78,8 @@ def build_parser() -> argparse.ArgumentParser:
         help='rounds per session, per scale, alternating ref order (default: 3)',
     )
     run.add_argument(
-        '-i', '--iterations', type=_positive_int, default=20,
-        help='timed iterations per scenario, per round (default: 20)',
+        '-i', '--iterations', type=_positive_int,
+        help="timed iterations per scenario, per round (default: each suite's, see below)",
     )
     run.add_argument(
         '-n', '--sessions', type=_positive_int, default=1,
