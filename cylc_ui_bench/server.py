@@ -332,6 +332,7 @@ class GuiServer(ThreadingHTTPServer):
                 {
                     'name': s.name,
                     'description': s.description,
+                    'scaled': s.scaled,
                     'default_scales': list(s.default_scales),
                     'scale_help': s.scale_help,
                 }

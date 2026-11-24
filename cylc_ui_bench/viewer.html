@@ -41,6 +41,18 @@ const fmt = (ms) => ms === 0 ? '0' : ms >= 100 ? ms.toFixed(0) : ms >= 10 ? ms.t
 const fmtDate = (d) => d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 const parse = (text) => text.split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l))
 
+// [threshold, suffix] per unit: values are shown in the first unit they reach
+const UNITS = { bytes: [[2 ** 30, 'GiB'], [2 ** 20, 'MiB'], [2 ** 10, 'KiB'], [1, 'B']] }
+function unitScale (unit, value) {
+  for (const [divisor, suffix] of UNITS[unit] ?? []) {
+    if (Math.abs(value) >= divisor) return [divisor, suffix]
+  }
+  return [1, UNITS[unit]?.at(-1)[1] ?? unit]
+}
+const fmtV = (value, unit, [divisor, suffix] = unitScale(unit, value)) => `${fmt(value / divisor)} ${suffix}`
+
+const groupKey = ({ meta }) => JSON.stringify([meta.suite ?? 'store', meta.counts ?? meta.scale ?? meta.scaleName ?? null])
+
 function median (xs) {
   const s = [...xs].sort((a, b) => a - b)
   const m = s.length >> 1
@@ -54,15 +66,18 @@ function niceMax (v) {
 
 function render () {
   out.innerHTML = ''
-  // one section per workflow size
+  // one section per suite and workload size
   const groups = new Map()
   for (const run of runs) {
-    const key = JSON.stringify(run.meta.counts)
+    const key = groupKey(run)
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key).push(run)
   }
-  const bySize = ({ meta: { counts: a } }, { meta: { counts: b } }) => a.tasks - b.tasks || a.cycles - b.cycles
-  for (const group of [...groups.values()].sort((a, b) => bySize(a[0], b[0]))) {
+  const order = ({ meta: a }, { meta: b }) =>
+    (a.suite ?? 'store').localeCompare(b.suite ?? 'store') ||
+    (a.counts?.tasks ?? 0) - (b.counts?.tasks ?? 0) ||
+    (a.counts?.cycles ?? 0) - (b.counts?.cycles ?? 0)
+  for (const group of [...groups.values()].sort((a, b) => order(a[0], b[0]))) {
     out.append(renderGroup(group, statSelect.value))
   }
 }
@@ -72,11 +87,17 @@ function renderGroup (group, stat) {
   const scenarios = [...new Set(group.flatMap((r) => r.results.map((x) => x.name)))]
   const colour = (label) => COLOURS[labels.indexOf(label) % COLOURS.length]
 
-  // points[scenario][label] = one point per run
+  // points[scenario][label] = one point per run; states[scenario][label] = other states seen
   const points = {}
+  const states = {}
+  const units = {}
   for (const run of group) {
     for (const x of run.results) {
-      if (x.state !== 'completed') continue
+      units[x.name] ??= x.unit ?? 'ms'
+      if (x.state !== 'completed') {
+        ((states[x.name] ??= {})[run.meta.label] ??= new Set()).add(x.state)
+        continue
+      }
       ((points[x.name] ??= {})[run.meta.label] ??= []).push({
         date: new Date(run.meta.date), value: x[stat], min: x.min, max: x.max,
       })
@@ -93,15 +114,27 @@ function renderGroup (group, stat) {
   const dates = group.map((r) => new Date(r.meta.date))
   const t0 = Math.min(...dates)
   const t1 = Math.max(...dates)
-  const { counts, vue, vueBuild, node, iterations, gc } = group[0].meta
-  const ctx = { labels, scenarios, points, medians, colour, stat, t0, t1 }
+  const { suite = 'store', counts, scaleName, vue, vueBuild, node, iterations, gc } = group[0].meta
+  const ctx = { labels, scenarios, points, states, units, medians, colour, stat, t0, t1 }
+
+  let heading = esc(suite)
+  if (counts) {
+    heading += `: ${counts.tasks} tasks, ${counts.jobs} jobs, ${counts.families} families, ${counts.cycles} cycles`
+  } else if (scaleName && scaleName !== 'default') {
+    heading += `: scale ${esc(scaleName)}`
+  }
+  const details = [
+    vue && `vue ${esc(vue)} (${esc(vueBuild)})`,
+    `node ${esc(node)}`,
+    gc !== undefined && `forced gc: ${esc(gc)}`,
+    iterations && `${iterations} iterations/run`,
+  ].filter(Boolean).join(', ')
 
   const section = document.createElement('section')
   section.innerHTML = `
-    <h2>${counts.tasks} tasks, ${counts.jobs} jobs, ${counts.families} families, ${counts.cycles} cycles</h2>
+    <h2>${heading}</h2>
     <p class="details">${group.length} runs, ${fmtDate(new Date(t0))} to ${fmtDate(new Date(t1))};
-      vue ${esc(vue)} (${esc(vueBuild)}), node ${esc(node)}, forced gc: ${esc(gc ?? 'unknown')},
-      ${iterations} iterations/run. Times are the median over runs of each run's ${stat}.</p>
+      ${details}. Values are the median over runs of each run's ${stat}; lower is better.</p>
     <p class="legend">${labels.map((l) => `<span><span class="swatch" style="background:${colour(l)}"></span>${esc(l)}</span>`).join('')}</p>
     ${table(ctx)}
     ${speedupChart(ctx)}
@@ -111,15 +144,20 @@ function renderGroup (group, stat) {
   return section
 }
 
-function table ({ labels, scenarios, points, medians }) {
+function table ({ labels, scenarios, points, states, units, medians }) {
   const head = `<tr><th>scenario</th>${labels.map((l) => `<th>${esc(l)}</th>`).join('')}</tr>`
   const rows = scenarios.map((s) => {
     const base = medians[s][labels[0]]
+    const scale = unitScale(units[s], base ?? Object.values(medians[s])[0] ?? 0)
     const cells = labels.map((l, i) => {
       const m = medians[s][l]
-      if (m === undefined) return '<td>-</td>'
+      if (m === undefined) {
+        const other = states[s]?.[l]
+        return `<td>${other ? `<small>${esc([...other].join(', '))}</small>` : '-'}</td>`
+      }
       const vals = points[s][l].map((p) => p.value)
-      let text = `${fmt(m)} ms <small>[${fmt(Math.min(...vals))}-${fmt(Math.max(...vals))}] n=${vals.length}</small>`
+      const v = (x) => fmt(x / scale[0])
+      let text = `${fmtV(m, units[s], scale)} <small>[${v(Math.min(...vals))}-${v(Math.max(...vals))}] n=${vals.length}</small>`
       if (i > 0 && base) {
         const x = base / m
         text += ` <span class="${x >= 1 ? 'faster' : 'slower'}">${x.toFixed(2)}x</span>`
@@ -164,11 +202,11 @@ function speedupChart ({ labels, scenarios, medians, colour }) {
   const height = y + 24
   svg += `<line x1="${xPos(1)}" x2="${xPos(1)}" y1="4" y2="${y}" stroke="#333" stroke-dasharray="4 3"/>`
   svg += `<text x="${xPos(1)}" y="${height - 8}" text-anchor="middle" fill="#666">1x = ${esc(labels[0])}</text>`
-  return `<h3>Speed-up relative to ${esc(labels[0])} (higher is better)</h3>
+  return `<h3>Relative to ${esc(labels[0])} (baseline / value: higher is better, i.e. faster or smaller)</h3>
     <svg width="${width}" height="${height}" font-size="12">${svg}</svg>`
 }
 
-function scenarioChart (scenario, { labels, points, medians, colour, stat, t0, t1 }) {
+function scenarioChart (scenario, { labels, points, units, medians, colour, stat, t0, t1 }) {
   const W = 360
   const H = 230
   const m = { l: 50, r: 12, t: 26, b: 34 }
@@ -176,7 +214,10 @@ function scenarioChart (scenario, { labels, points, medians, colour, stat, t0, t
   const ph = H - m.t - m.b
   const all = labels.flatMap((l) => points[scenario]?.[l] ?? [])
   if (!all.length) return ''
-  const yMax = niceMax(Math.max(...all.map((p) => p.value)) * 1.3)
+  const unit = units[scenario]
+  const yMaxRaw = Math.max(...all.map((p) => p.value)) * 1.3
+  const [divisor, suffix] = unitScale(unit, yMaxRaw)
+  const yMax = niceMax(yMaxRaw / divisor) * divisor
   const span = Math.max(t1 - t0, 1)
   // nudge labels apart so runs at similar times don't overlap
   const x = (date, i) => m.l + 12 + ((date - t0) / span) * (pw - 24) + (i - (labels.length - 1) / 2) * 7
@@ -186,9 +227,9 @@ function scenarioChart (scenario, { labels, points, medians, colour, stat, t0, t
   for (let i = 0; i <= 4; i++) {
     const v = (yMax * i) / 4
     svg += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="#eee"/>`
-    svg += `<text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end" fill="#666">${fmt(v)}</text>`
+    svg += `<text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end" fill="#666">${fmt(v / divisor)}</text>`
   }
-  svg += `<text x="14" y="${m.t + ph / 2}" transform="rotate(-90 14 ${m.t + ph / 2})" text-anchor="middle" fill="#666">ms</text>`
+  svg += `<text x="14" y="${m.t + ph / 2}" transform="rotate(-90 14 ${m.t + ph / 2})" text-anchor="middle" fill="#666">${esc(suffix)}</text>`
   svg += `<text x="${m.l}" y="${H - 10}" fill="#666">${fmtDate(new Date(t0))}</text>`
   if (t1 > t0) svg += `<text x="${W - m.r}" y="${H - 10}" text-anchor="end" fill="#666">${fmtDate(new Date(t1))}</text>`
 
@@ -200,7 +241,7 @@ function scenarioChart (scenario, { labels, points, medians, colour, stat, t0, t
     }
     for (const p of points[scenario]?.[l] ?? []) {
       const px = x(p.date, i)
-      const tip = `${l}\n${p.date.toLocaleString()}\n${stat} ${fmt(p.value)} ms (min ${fmt(p.min)}, max ${fmt(p.max)})`
+      const tip = `${l}\n${p.date.toLocaleString()}\n${stat} ${fmtV(p.value, unit)} (min ${fmtV(p.min, unit)}, max ${fmtV(p.max, unit)})`
       svg += `<line x1="${px}" x2="${px}" y1="${y(p.min)}" y2="${y(p.max)}" stroke="${c}" opacity="0.35"/>`
       svg += `<circle cx="${px}" cy="${y(p.value)}" r="3.5" fill="${c}"><title>${esc(tip)}</title></circle>`
     }

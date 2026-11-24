@@ -1,17 +1,41 @@
 """Benchmark suites.
 
-A suite is a set of vitest spec files that are copied into each cylc-ui
-worktree and run there. Each spec appends one JSON line per run to the file
-named by $BENCH_OUT: {"meta": {...}, "results": [{"name": ..., ...}]}.
+Each suite is a subpackage of this one, defining a Suite subclass, and is
+found automatically. Subpackages starting with "_" are not suites: _common
+holds JS shared by all suites (harness.js, workflow.js), which is copied into
+every worktree alongside the suites' own files.
 
-To add a suite, create a subpackage defining a Suite subclass and register an
-instance of it in SUITES below.
+There are two kinds of suite:
+
+* vitest suites (the default): the suite's *.js files are copied into the
+  worktree and run with vitest. The specs use _common/harness.js, which appends
+  results to $BENCH_OUT.
+* command suites: override command() to run something else and collect() to
+  turn its output into results, which the runner records.
+
+Either way, each suite run produces one line of results.jsonl:
+  {"meta": {...}, "results": [{"name", "unit", "state", "p50", "mean", ...}]}
 """
 from __future__ import annotations
 
+import importlib
 import inspect
+import pkgutil
+import re
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional
+
+COMMON_DIR = Path(__file__).parent / '_common'
+WORKFLOW_SCALE_HELP = 'CYCLESxTASKSxJOBS, e.g. 10x500x2 (tasks per cycle, jobs per task)'
+
+
+def workflow_scale_env(scale: str) -> Dict[str, str]:
+    """Env vars for a synthetic workflow scale (see _common/workflow.js)."""
+    match = re.fullmatch(r'(\d+)x(\d+)x(\d+)', scale)
+    if not match:
+        raise ValueError(f'invalid scale: {scale!r} ({WORKFLOW_SCALE_HELP})')
+    cycles, tasks, jobs = match.groups()
+    return {'BENCH_CYCLES': cycles, 'BENCH_TASKS': tasks, 'BENCH_JOBS': jobs}
 
 
 class Suite:
@@ -19,19 +43,23 @@ class Suite:
 
     #: unique name, used on the command line and in results
     name = ''
-    #: one-line description for --help
+    #: one-line description for --help and the GUI
     description = ''
-    #: files in the suite's directory to copy into the worktree
-    files: Tuple[str, ...] = ()
+    #: whether the suite runs at each of the run's (workflow) scales;
+    #: suites that aren't scaled run once per round, ignoring --scale
+    scaled = True
     #: scales to run when none are given
-    default_scales: Tuple[str, ...] = ('default',)
-    #: help text describing the scale format
-    scale_help = ''
+    default_scales = ('10x500x2',)
+    scale_help = WORKFLOW_SCALE_HELP
 
     @property
     def path(self) -> Path:
         """Directory containing the suite's files."""
         return Path(inspect.getfile(type(self))).parent
+
+    def files(self) -> List[Path]:
+        """Files to copy into the worktree: by default the suite's *.js."""
+        return sorted(self.path.glob('*.js'))
 
     def target(self) -> str:
         """Directory within the worktree that the suite's files go in."""
@@ -39,16 +67,33 @@ class Suite:
 
     def scale_env(self, scale: str) -> Dict[str, str]:
         """Return env vars for a scale; raise ValueError if it is invalid."""
-        return {}
+        return workflow_scale_env(scale) if self.scaled else {}
 
     def command(self) -> List[str]:
         """Command to run the suite from the worktree root."""
         return ['npx', 'vitest', 'run', f'{self.target()}/', '--silent=false']
 
+    def collect(self, worktree: Path, output: str, elapsed: float) -> Optional[List[dict]]:
+        """Results for a command suite, from its output and elapsed time (s).
 
-def _load() -> Dict[str, Suite]:
-    from .store import StoreSuite
-    return {suite.name: suite for suite in (StoreSuite(),)}
+        Return None for vitest suites, whose specs record their own results.
+        """
+        return None
 
 
-SUITES = _load()
+def _discover() -> Dict[str, Suite]:
+    suites = {}
+    for module in pkgutil.iter_modules(__path__):
+        if module.name.startswith('_'):
+            continue
+        mod = importlib.import_module(f'{__name__}.{module.name}')
+        for obj in vars(mod).values():
+            if inspect.isclass(obj) and issubclass(obj, Suite) and obj.__module__ == mod.__name__:
+                suite = obj()
+                if suite.name in suites:
+                    raise RuntimeError(f'duplicate suite name: {suite.name}')
+                suites[suite.name] = suite
+    return dict(sorted(suites.items()))
+
+
+SUITES = _discover()

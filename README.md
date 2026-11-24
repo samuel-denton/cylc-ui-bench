@@ -3,9 +3,14 @@
 Benchmark parts of the [cylc-ui](https://github.com/cylc/cylc-ui) across git
 refs, e.g. a PR branch against master.
 
-Currently one suite is available, `store`, which times the workflows Vuex store
-mutations (initial load, spawning/pruning a cycle, updating every node and
-removing a workflow) against a synthetic workflow of configurable size.
+Suites:
+
+| Suite | What it measures |
+|---|---|
+| `store` | workflows Vuex store mutations (initial load, spawning/pruning a cycle, updating every node, removing a workflow) and the memory a loaded store retains |
+
+Suites marked as scaled run against a synthetic workflow of configurable size
+(`CYCLESxTASKSxJOBS`, e.g. `10x500x2`).
 
 ## Requirements
 
@@ -86,23 +91,31 @@ Environment variables:
 | `CYLC_UI` | the current directory or `../cylc-ui` next to this tool, if either is cylc-ui | cylc-ui checkout (`-C` takes precedence) |
 | `BENCH_RESULTS` | `results/` in this tool | where run directories are created (`-o` takes precedence) |
 | `BENCH_TMP` | `~/.cache/cylc-ui-bench` | where temporary worktrees are created |
-| `BENCH_FAMILY_DEPTH` | 2 | `store`: levels of families below root |
-| `BENCH_FAMILY_BREADTH` | 5 | `store`: child families per family |
+| `BENCH_FAMILY_DEPTH` | 2 | synthetic workflow: levels of families below root |
+| `BENCH_FAMILY_BREADTH` | 5 | synthetic workflow: child families per family |
 
 ## How it works
 
 1. Each ref is resolved to a commit and checked out into a temporary git
    worktree (detached, so your checkout is untouched), with `node_modules`
    symlinked from the main checkout. These are reused for the whole run.
-2. Each suite's spec files are copied into `tests/unit/_bench/<suite>/` of each
-   worktree and run with vitest, using a production Vue build and `--expose-gc`.
+   Note that every ref runs with the main checkout's dependencies; a warning
+   is logged if a ref's `yarn.lock` differs.
+2. `suites/_common/` and each suite's files are copied into
+   `tests/unit/_bench/` of each worktree. Vitest suites are run with vitest,
+   using a production Vue build and `--expose-gc`; command suites run their
+   own command.
 3. For each session, suite, scale and round, every ref is run in turn,
-   alternating the order (ABBA...) so machine noise is spread evenly.
+   alternating the order (ABBA...) so machine noise is spread evenly. Suites
+   that aren't scaled run once per round.
 4. Every suite run appends one line to `results.jsonl`:
    `{"meta": {...}, "results": [...]}`, where `meta` records the suite, ref
    label, session, round, date, node/vue versions and scale, and each result
-   holds a scenario's latency statistics in ms.
-5. At the end, the results are summarised, comparing each ref to the first.
+   holds a scenario's `state` (`completed`, `skipped` or `errored`), `unit`
+   (`ms`, `s` or `bytes`; lower is always better) and statistics over its
+   iterations (`p50`, `mean`, `min`, `max`...).
+5. At the end, the results are summarised, comparing each ref to the first as
+   baseline / value, so higher is better.
 
 ## Results
 
@@ -124,10 +137,47 @@ results/20261124-141500/
 
 ## Adding a suite
 
-Create a subpackage of `cylc_ui_bench/suites/` containing its vitest spec files
-and a `Suite` subclass (see `suites/store/__init__.py`), and register it in
-`SUITES` in `suites/__init__.py`. The spec should append a line to `$BENCH_OUT`
-in the format above.
+Create a subpackage of `cylc_ui_bench/suites/` (it is found automatically)
+with an `__init__.py` defining a `Suite` subclass, e.g.
+
+```python
+from .. import Suite
+
+class TreeSuite(Suite):
+    name = 'tree'
+    description = 'Tree view rendering'
+```
+
+For a **vitest suite** (the default), add `*.bench.spec.js` files alongside it.
+They are copied into `tests/unit/_bench/<name>/` and can import
+`../_common/harness.js` and `../_common/workflow.js` (see
+`suites/store/store.bench.spec.js`):
+
+```js
+import { defineBench, tryImport, workflowParams } from '../_common/harness.js'
+import { makeWorkflow } from '../_common/workflow.js'
+
+defineBench('tree', async () => {
+  const params = workflowParams()
+  const wf = makeWorkflow(params)
+  // import cylc-ui code dynamically so refs without it skip, not fail
+  const mod = await tryImport(() => import('@/some/module'))
+  return {
+    params,
+    counts: wf.counts,
+    scenarios: {
+      'timed thing': mod ? { fn: () => mod.thing(), beforeEach () { /* untimed setup */ } }
+                         : { skip: 'no @/some/module' },
+      'memory thing': { unit: 'bytes', measure: () => 123 },
+    },
+  }
+})
+```
+
+For a **command suite**, set `scaled = False` if it doesn't use the workflow
+scale, and override `command()` to return the command to run in the worktree
+and `collect(worktree, output, elapsed)` to return its results, as a list of
+`{"name", "unit", "state", "p50", ...}` dicts.
 
 ## Layout
 
@@ -142,5 +192,6 @@ cylc_ui_bench/
   server.py         the GUI's web server and API
   gui/              the GUI (Vue 3, no build step; Vue is vendored in gui/vendor/, MIT licence)
   suites/           benchmark suites copied into cylc-ui worktrees
+    _common/        harness.js and workflow.js, shared by all suites
 results/            output (not tracked)
 ```

@@ -44,7 +44,8 @@ export default {
       if (!props.options) return 0
       const perSuite = form.suites.map((name) => {
         const suite = props.options.suites.find((s) => s.name === name)
-        return scales.value.length || suite?.default_scales.length || 1
+        if (!suite?.scaled) return 1
+        return scales.value.length || suite.default_scales.length
       })
       const scaleRuns = perSuite.reduce((a, b) => a + b, 0)
       return form.sessions * form.rounds * refs.value.length * scaleRuns
@@ -110,10 +111,11 @@ export default {
 
         <div class="field">
           <label class="title">Scales</label>
-          <input v-model="form.scales" placeholder="suite defaults" size="40">
-          <div class="help" v-for="s in options.suites" :key="s.name">
-            {{ s.name }}: {{ s.scale_help }}; default {{ s.default_scales.join(' ') }}.
-            Separate several with spaces.
+          <input v-model="form.scales" placeholder="default 10x500x2" size="40">
+          <div class="help">
+            Synthetic workflow sizes, {{ options.suites.find((s) => s.scaled)?.scale_help }}. Separate several with spaces.
+            Applies to {{ options.suites.filter((s) => s.scaled).map((s) => s.name).join(', ') || 'no suites' }};
+            other suites run once per round.
           </div>
         </div>
 

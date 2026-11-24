@@ -25,12 +25,12 @@ import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from .report import write_reports
-from .suites import SUITES, Suite
+from .suites import COMMON_DIR, SUITES, Suite
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 WORKTREE_PARENT = 'run.'
@@ -103,6 +103,13 @@ def _write_json(path: Path, data: dict) -> None:
     os.replace(tmp, path)
 
 
+def _read_bytes(path: Path) -> Optional[bytes]:
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
 def make_run_dir(base: Path) -> Path:
     base.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -162,12 +169,15 @@ class Runner:
                 raise RunError(f'unknown suite: {name} (available: {", ".join(SUITES)})')
         self.suites = [SUITES[name] for name in dict.fromkeys(c.suites)]
         for suite in self.suites:
+            if not suite.scaled:
+                self.scales[suite.name] = ['default']
+                continue
             scales = c.scales or list(suite.default_scales)
             for scale in scales:
                 try:
                     suite.scale_env(scale)
                 except ValueError as exc:
-                    raise RunError(str(exc)) from None
+                    raise RunError(f'{suite.name}: {exc}') from None
             self.scales[suite.name] = scales
         for name in ('rounds', 'iterations', 'sessions'):
             if getattr(c, name) < 1:
@@ -180,6 +190,9 @@ class Runner:
             raise RunError('npx not found on PATH')
         if not (self.repo / 'node_modules').is_dir():
             raise RunError(f'no node_modules in {self.repo} (run yarn install)')
+        self.node_version = subprocess.run(
+            ['node', '--version'], capture_output=True, text=True, check=False,
+        ).stdout.strip() or None
 
     def resolve_refs(self) -> None:
         if self.config.fetch:
@@ -199,11 +212,18 @@ class Runner:
             path = self.work / f"{i}-{ref['ref'].replace('/', '_')}"
             _git(self.repo, 'worktree', 'add', '--detach', '--quiet', str(path), ref['sha'])
             (path / 'node_modules').symlink_to(self.repo / 'node_modules')
+            if _read_bytes(path / 'yarn.lock') != _read_bytes(self.repo / 'yarn.lock'):
+                self.log(
+                    f"WARNING: {ref['label']} has a different yarn.lock to {self.repo},"
+                    ' but runs with its node_modules'
+                )
+            bench_dir = path / 'tests/unit/_bench'
+            shutil.copytree(COMMON_DIR, bench_dir / '_common', dirs_exist_ok=True)
             for suite in self.suites:
                 target = path / suite.target()
                 target.mkdir(parents=True, exist_ok=True)
-                for name in suite.files:
-                    shutil.copy2(suite.path / name, target / name)
+                for file in suite.files():
+                    shutil.copy2(file, target / file.name)
             self.worktrees[ref['label']] = path
 
     def cleanup(self) -> None:
@@ -335,6 +355,7 @@ class Runner:
                 'NO_COLOR': '1',
                 'NODE_OPTIONS': ' '.join(filter(None, [os.environ.get('NODE_OPTIONS'), '--expose-gc'])),
                 'BENCH_SUITE': suite.name,
+                'BENCH_SCALE': scale,
                 'BENCH_LABEL': ref['label'],
                 'BENCH_SESSION': str(session),
                 'BENCH_ROUND': str(round_),
@@ -343,12 +364,44 @@ class Runner:
             }
             if c.only:
                 env['BENCH_ONLY'] = c.only
-            with open(self.log_path, 'a') as log:
-                code = _run_command(suite.command(), self.worktrees[ref['label']], env, log)
+            worktree = self.worktrees[ref['label']]
+            start = time.monotonic()
+            with open(self.log_path, 'ab') as log:
+                offset = log.tell()
+                code = _run_command(suite.command(), worktree, env, log)
+            elapsed = time.monotonic() - start
+            with open(self.log_path, 'rb') as log:
+                log.seek(offset)
+                output = log.read().decode(errors='replace')
+            if not code:
+                try:
+                    results = suite.collect(worktree, output, elapsed)
+                except Exception as exc:
+                    self.log(f'    could not collect results: {exc!r}')
+                    code = -1
+                else:
+                    if results is not None:
+                        self._record(suite, ref, session, round_, scale, results)
             if code:
                 self.log(f'    FAILED (exit {code}, see log)')
                 self.update_status(failed=self.status['failed'] + 1)
             self.update_status(done=i + 1)
+
+    def _record(self, suite: Suite, ref: dict, session: int, round_: int, scale: str, results: List[dict]):
+        """Append results collected by a command suite."""
+        meta = {
+            'suite': suite.name,
+            'label': ref['label'],
+            'session': session,
+            'round': round_,
+            'date': datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
+            'node': self.node_version,
+            'scaleName': scale,
+            'scale': None,
+            'counts': None,
+        }
+        with open(self.results_path, 'a') as f:
+            f.write(json.dumps({'meta': meta, 'results': results}) + '\n')
 
     def _finish(self, state: str) -> None:
         if self.results_path.exists() and self.results_path.stat().st_size:

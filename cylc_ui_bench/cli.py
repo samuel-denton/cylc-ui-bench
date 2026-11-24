@@ -40,10 +40,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest='command', metavar='COMMAND', required=True)
 
-    suites = '\n'.join(
-        f'  {s.name:<10} {s.description}\n  {"":<10} scale: {s.scale_help}'
-        for s in SUITES.values()
-    )
+    def describe(s):
+        scale = f'scale: {s.scale_help}' if s.scaled else '(not scaled)'
+        return f'  {s.name:<10} {s.description}\n  {"":<10} {scale}'
+
+    suites = '\n'.join(describe(s) for s in SUITES.values())
     run = sub.add_parser(
         'run',
         help='benchmark git refs',

@@ -1,4 +1,5 @@
-// Synthetic workflow deltas shaped like the cylc-ui Tree view subscription results.
+// Synthetic workflow deltas shaped like the cylc-ui Tree view subscription results,
+// shared by the benchmark suites.
 // Dependency-free so it can be copied into any cylc-ui checkout.
 
 const FLAGS = Object.freeze({
