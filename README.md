@@ -74,6 +74,5 @@ Alternatively, open `report/viewer.html` in a browser and drop `.jsonl` files on
 bin/        runners (run.sh, overnight.sh)
 suites/     benchmark suites copied into cylc-ui worktrees
 report/     summaries and the HTML viewer
-legacy/     older scripts, to be turned into suites
 results/    output (not tracked)
 ```
