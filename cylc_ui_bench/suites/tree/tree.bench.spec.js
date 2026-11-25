@@ -1,10 +1,17 @@
 // Tree view rendering against a synthetic workflow, in happy-dom.
-import { mockRoute } from '$tests/util'
+// import { mockRoute } from '$tests/util'
+import { config } from '@vue/test-utils'
+import { routeLocationKey } from 'vue-router'
 import { defineBench, tryImport, workflowParams } from '../_common/harness.js'
 import { flushPromises, loadRenderer, memoryScenarios } from '../_common/render.js'
 import { makeWorkflow } from '../_common/workflow.js'
 
-// views show ~<owner>/<workflowName>, owner being "owner" in tests/unit/setup.js
+// Views show ~<owner>/<workflowName>, owner being "owner" in tests/unit/setup.js
+// Temporary local mockRoute, added May 14th, 2026.
+function mockRoute (route = { params: { workflowName: 'test' } }) {
+    config.global.provide[routeLocationKey] = route
+}
+
 mockRoute({ params: { workflowName: 'wf' } })
 
 defineBench('tree', async () => {

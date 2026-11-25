@@ -7,6 +7,7 @@
   body { font-family: system-ui, sans-serif; margin: 2em; color: #222; }
   h2 { margin-top: 2em; border-bottom: 1px solid #ccc; }
   .details { color: #666; font-size: 0.9em; }
+  .note { color: #8a5a00; background: #fdf3e1; padding: 0.3em 0.6em; font-size: 0.9em; }
   table { border-collapse: collapse; margin: 1em 0; font-size: 0.9em; }
   th, td { padding: 0.3em 0.8em; border-bottom: 1px solid #eee; text-align: right; }
   th:first-child, td:first-child { text-align: left; }
@@ -133,9 +134,26 @@ function renderGroup (group, stat) {
     iterations && `${iterations} iterations/run`,
   ].filter(Boolean).join(', ')
 
+  // warn about differing DOM environments, and list differing package versions
+  const notes = []
+  const envs = Object.fromEntries(labels.map((l) => [l, [...new Set(group.filter((r) => r.meta.label === l).map((r) => r.meta.environment).filter(Boolean))]]))
+  if (new Set(Object.values(envs).flat()).size > 1) {
+    notes.push(`<b>Warning:</b> refs ran in different DOM environments, so results partly compare those: ${labels.map((l) => `${esc(l)} ${esc(envs[l].join('/') || '?')}`).join(', ')}`)
+  }
+  const versions = {}
+  for (const r of group) {
+    for (const [name, v] of Object.entries(r.meta.packages ?? {})) (versions[name] ??= {})[r.meta.label] = v
+  }
+  for (const [name, byLabel] of Object.entries(versions)) {
+    if (new Set(Object.values(byLabel)).size > 1 || Object.keys(byLabel).length < labels.length) {
+      notes.push(`${esc(name)} differs: ${labels.map((l) => `${esc(l)} ${esc(byLabel[l] ?? '-')}`).join(', ')}`)
+    }
+  }
+
   const section = document.createElement('section')
   section.innerHTML = `
     <h2>${heading}</h2>
+    ${notes.map((n) => `<p class="note">${n}</p>`).join('')}
     <p class="details">${group.length} runs, ${fmtDate(new Date(t0))} to ${fmtDate(new Date(t1))};
       ${details}. Values are the median over runs of each run's ${stat}; lower is better.</p>
     <p class="legend">${labels.map((l) => `<span><span class="swatch" style="background:${colour(l)}"></span>${esc(l)}</span>`).join('')}</p>

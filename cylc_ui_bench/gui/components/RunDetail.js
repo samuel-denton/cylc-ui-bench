@@ -60,6 +60,10 @@ export default {
             <dt>Settings</dt>
             <dd>{{ run.rounds }} rounds × {{ run.sessions }} sessions<span v-if="run.sessions > 1">, {{ run.delay }} min apart</span>, {{ run.iterations ?? 'default' }} iterations<span v-if="run.only">, only /{{ run.only }}/</span></dd>
           </template>
+          <template v-if="run.node_modules && Object.keys(run.node_modules).length">
+            <dt>node_modules</dt>
+            <dd>{{ Object.entries(run.node_modules).map(([l, m]) => l + ': ' + m).join('; ') }}</dd>
+          </template>
           <dt>Started</dt><dd>{{ fmtDate(run.started) }}</dd>
           <dt v-if="run.finished">Finished</dt><dd v-if="run.finished">{{ fmtDate(run.finished) }}</dd>
           <dt>Directory</dt><dd><code>{{ run.path }}</code></dd>

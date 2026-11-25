@@ -29,7 +29,8 @@ from urllib.parse import parse_qs, urlsplit
 
 from .report import render_html
 from .runner import (
-    Config, RunError, Runner, raise_interrupt, default_results_dir, find_cylc_ui, make_run_dir,
+    INSTALL_MODES, Config, RunError, Runner, raise_interrupt, default_results_dir, find_cylc_ui,
+    make_run_dir,
 )
 from .suites import SUITES
 from .summarise import load, summarise
@@ -147,6 +148,8 @@ class Results:
             'sessions': config.get('sessions'),
             'delay': config.get('delay'),
             'only': config.get('only'),
+            'install': config.get('install'),
+            'node_modules': {r['label']: r['node_modules'] for r in config.get('refs', []) if 'node_modules' in r},
             'host': config.get('host'),
             'total': status.get('total'),
             'done': status.get('done', 0),
@@ -233,6 +236,7 @@ class Results:
                 cmd += ['--only', config.only]
             if config.fetch:
                 cmd.append('--fetch')
+            cmd += ['--install', config.install]
             cmd += ['--', *config.refs]
             pythonpath = [str(PACKAGE_PARENT), os.environ.get('PYTHONPATH', '')]
             env = {**os.environ, 'PYTHONPATH': os.pathsep.join(filter(None, pythonpath))}
@@ -286,6 +290,9 @@ def config_from_request(body: dict, cylc_ui: Path) -> Config:
     only = body.get('only') or None
     if only is not None and not isinstance(only, str):
         raise RunError('only must be a string')
+    install = body.get('install', defaults.install)
+    if install not in INSTALL_MODES:
+        raise RunError(f"install must be one of {', '.join(INSTALL_MODES)}")
     return Config(
         refs=refs,
         cylc_ui=str(cylc_ui),
@@ -297,6 +304,7 @@ def config_from_request(body: dict, cylc_ui: Path) -> Config:
         delay=number('delay', float),
         only=only,
         fetch=bool(body.get('fetch', False)),
+        install=install,
     )
 
 
@@ -343,7 +351,8 @@ class GuiServer(ThreadingHTTPServer):
                 }
                 for s in SUITES.values()
             ],
-            'defaults': {k: defaults[k] for k in ('refs', 'rounds', 'iterations', 'sessions', 'delay')},
+            'defaults': {k: defaults[k] for k in ('refs', 'rounds', 'iterations', 'sessions', 'delay', 'install')},
+            'install_modes': list(INSTALL_MODES),
         }
 
 

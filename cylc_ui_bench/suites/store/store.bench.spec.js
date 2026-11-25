@@ -1,5 +1,5 @@
-// @vitest-environment node
 // Benchmarks for the workflows store mutations against a synthetic workflow.
+// Runs in the ref's default test environment, as its test setup may need it.
 import { createStore } from 'vuex'
 import { defineBench, gc, tryImport, workflowParams } from '../_common/harness.js'
 import { makeWorkflow } from '../_common/workflow.js'

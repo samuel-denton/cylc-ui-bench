@@ -19,6 +19,7 @@ export default {
       delay: 30,
       only: '',
       fetch: false,
+      install: 'auto',
     })
     const error = ref(null)
     const submitting = ref(false)
@@ -34,6 +35,7 @@ export default {
         iterations: d.iterations,
         sessions: d.sessions,
         delay: d.delay,
+        install: d.install,
       })
     }, { immediate: true })
 
@@ -70,6 +72,7 @@ export default {
           delay: form.delay,
           only: form.only || null,
           fetch: form.fetch,
+          install: form.install,
         })
         emit('started', id)
       } catch (err) {
@@ -132,6 +135,16 @@ export default {
 
         <div class="field">
           <label><input type="checkbox" v-model="form.fetch"> git fetch --all first</label>
+        </div>
+
+        <div class="field">
+          <label class="title">Dependencies</label>
+          <select v-model="form.install">
+            <option value="auto">auto: yarn install for refs whose dependencies differ from the checkout's</option>
+            <option value="always">always: yarn install for every ref</option>
+            <option value="never">never: use the checkout's node_modules for every ref</option>
+          </select>
+          <div class="help">Installs are temporary (~0.8 GB each, shared by refs with the same yarn.lock) and can take a few minutes.</div>
         </div>
 
         <p class="muted">{{ runCount }} suite runs in total.</p>

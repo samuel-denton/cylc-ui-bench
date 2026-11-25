@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from .runner import INSTALL_MODES
 from .suites import SUITES
 
 EXAMPLES = """\
@@ -93,6 +94,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument('-f', '--fetch', action='store_true', help='git fetch --all first')
     run.add_argument('-k', '--keep', action='store_true', help='keep the worktrees afterwards')
     run.add_argument(
+        '--install', choices=INSTALL_MODES, default='auto',
+        help="when to yarn install a ref's own node_modules, rather than use the"
+             " checkout's: auto (if its yarn.lock or .yarnrc.yml differ), always"
+             ' or never (default: auto)',
+    )
+    run.add_argument(
         '-o', '--results-dir', metavar='DIR',
         help='where to create the run directory'
              ' (default: $BENCH_RESULTS, else results/ in this tool)',
@@ -153,6 +160,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         only=args.only,
         fetch=args.fetch,
         keep=args.keep,
+        install=args.install,
         results_dir=args.results_dir,
         run_dir=args.run_dir,
     )

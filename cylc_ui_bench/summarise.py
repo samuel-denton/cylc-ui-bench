@@ -56,6 +56,33 @@ def summarise(runs: List[dict], stat: str = 'p50', markdown: bool = False) -> st
     return ''.join(_group(group, stat, printer) for group in groups(runs))
 
 
+def differences(runs: List[dict], labels: List[str]) -> List[str]:
+    """Describe how the labels' environments and package versions differ."""
+    def per_label(key):
+        return {
+            label: {json.dumps(r['meta'].get(key), sort_keys=True) for r in runs if r['meta']['label'] == label}
+            for label in labels
+        }
+
+    notes = []
+    environments = per_label('environment')
+    if len(set().union(*environments.values()) - {'null'}) > 1:
+        notes.append(
+            'WARNING: refs ran in different DOM environments, so results partly compare those: '
+            + ', '.join(f"{label} {'/'.join(json.loads(e) or '?' for e in envs)}" for label, envs in environments.items())
+        )
+    versions = defaultdict(dict)  # package: {label: version}
+    for r in runs:
+        for name, version in (r['meta'].get('packages') or {}).items():
+            versions[name][r['meta']['label']] = version
+    for name, by_label in versions.items():
+        if len(set(by_label.values())) > 1 or len(by_label) < len(labels):
+            notes.append(
+                f'{name} differs: ' + ', '.join(f"{label} {by_label.get(label, '-')}" for label in labels)
+            )
+    return notes
+
+
 UNITS = {
     # unit: [(threshold, divisor, suffix), ...] choosing the first threshold below the value
     'ms': [(0, 1, 'ms')],
@@ -80,6 +107,7 @@ def _group(runs, stat, printer):
             warnings.append(f'WARNING: runs differ in {key}: {sorted(values)}')
 
     labels = list(dict.fromkeys(r['meta']['label'] for r in runs))
+    warnings += differences(runs, labels)
     scenarios = list(dict.fromkeys(res['name'] for r in runs for res in r['results']))
     units = {}
     no_ratio = set()
@@ -134,6 +162,9 @@ def _group(runs, stat, printer):
     details.append(f"node {meta.get('node')}")
     if 'gc' in meta:
         details.append(f"forced gc: {meta['gc']}")
+    environments = {r['meta'].get('environment') for r in runs} - {None}
+    if len(environments) == 1:
+        details.append(f'environment {environments.pop()}')
     if meta.get('iterations'):
         details.append(f"{meta['iterations']} iterations/run")
     details.append(f'{len(runs)} runs')

@@ -13,9 +13,12 @@
 //
 // Configured by the runner via env vars; results are appended to $BENCH_OUT as
 // one JSON line: {"meta": {...}, "results": [...]}.
-import { appendFileSync } from 'node:fs'
 import { Bench } from 'tinybench'
 import { reactive, version as vueVersion } from 'vue'
+
+// loaded at runtime, as some refs' vite configs treat node: imports in
+// browser-like test environments (e.g. jsdom) as unavailable
+const { appendFileSync, readFileSync } = process.getBuiltinModule('node:fs')
 
 export const envNumber = (name, dflt) => Number(process.env[name] ?? dflt)
 
@@ -55,6 +58,32 @@ function vueBuild () {
   reactive(1)
   console.warn = warn
   return warned ? 'dev' : 'prod'
+}
+
+/** The DOM implementation tests run with, from the ref's vitest config. */
+function environment () {
+  if (typeof window === 'undefined') return 'node'
+  const agent = globalThis.navigator?.userAgent ?? ''
+  if (agent.includes('HappyDOM')) return 'happy-dom'
+  if (agent.includes('jsdom')) return 'jsdom'
+  return 'other'
+}
+
+// versions of packages that affect results, which differ between refs when
+// they have their own node_modules
+const PACKAGES = ['vue', 'vuex', 'vuetify', 'vitest', 'happy-dom', 'jsdom', '@hpcc-js/wasm']
+
+function packageVersions () {
+  const versions = {}
+  for (const name of PACKAGES) {
+    try {
+      const pkg = JSON.parse(readFileSync(`${process.cwd()}/node_modules/${name}/package.json`, 'utf8'))
+      versions[name] = pkg.version
+    } catch {
+      // not installed in this ref
+    }
+  }
+  return versions
 }
 
 function stats (values) {
@@ -177,6 +206,8 @@ export function defineBench (suite, setup) {
         vue: vueVersion,
         vueBuild: vueBuild(),
         gc: typeof globalThis.gc === 'function',
+        environment: environment(),
+        packages: packageVersions(),
         iterations: ITERATIONS,
         scaleName: process.env.BENCH_SCALE ?? null,
         scale: params,

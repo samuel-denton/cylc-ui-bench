@@ -34,6 +34,10 @@ from .suites import COMMON_DIR, SUITES, Suite
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 WORKTREE_PARENT = 'run.'
+INSTALL_MODES = ('auto', 'always', 'never')
+# files that determine what `yarn install` installs (dependency changes in
+# package.json also change yarn.lock)
+DEPENDENCY_FILES = ('yarn.lock', '.yarnrc.yml')
 
 
 class RunError(Exception):
@@ -54,6 +58,9 @@ class Config:
     only: Optional[str] = None
     fetch: bool = False
     keep: bool = False
+    #: when to install a ref's own node_modules: 'auto' (if its dependencies
+    #: differ from the checkout's), 'always' or 'never'
+    install: str = 'auto'
     results_dir: Optional[str] = None
     #: use this (new or empty) directory rather than creating one in results_dir
     run_dir: Optional[str] = None
@@ -109,6 +116,10 @@ def _read_bytes(path: Path) -> Optional[bytes]:
         return path.read_bytes()
     except OSError:
         return None
+
+
+def _dependencies(path: Path) -> tuple:
+    return tuple(_read_bytes(path / name) for name in DEPENDENCY_FILES)
 
 
 def make_run_dir(base: Path) -> Path:
@@ -186,6 +197,8 @@ class Runner:
                 raise RunError(f'{name} must be at least 1')
         if c.delay < 0:
             raise RunError('delay must not be negative')
+        if c.install not in INSTALL_MODES:
+            raise RunError(f"install must be one of {', '.join(INSTALL_MODES)}")
 
         self.repo = find_cylc_ui(c.cylc_ui)
         if not shutil.which('npx'):
@@ -210,15 +223,29 @@ class Runner:
         tmp_base = Path(os.environ.get('BENCH_TMP') or Path.home() / '.cache' / 'cylc-ui-bench')
         tmp_base.mkdir(parents=True, exist_ok=True)
         self.work = Path(tempfile.mkdtemp(prefix=WORKTREE_PARENT, dir=tmp_base))
+        checkout_deps = _dependencies(self.repo)
+        installed: Dict[tuple, Path] = {}  # node_modules installed per set of dependencies
         for i, ref in enumerate(self.refs):
             path = self.work / f"{i}-{ref['ref'].replace('/', '_')}"
             _git(self.repo, 'worktree', 'add', '--detach', '--quiet', str(path), ref['sha'])
-            (path / 'node_modules').symlink_to(self.repo / 'node_modules')
-            if _read_bytes(path / 'yarn.lock') != _read_bytes(self.repo / 'yarn.lock'):
-                self.log(
-                    f"WARNING: {ref['label']} has a different yarn.lock to {self.repo},"
-                    ' but runs with its node_modules'
-                )
+            self.worktrees[ref['label']] = path
+            deps = _dependencies(path)
+            mode = self.config.install
+            if mode == 'never' or (mode == 'auto' and deps == checkout_deps):
+                (path / 'node_modules').symlink_to(self.repo / 'node_modules')
+                ref['node_modules'] = 'checkout'
+                if deps != checkout_deps:
+                    self.log(
+                        f"WARNING: {ref['label']} has different dependencies to {self.repo},"
+                        ' but runs with its node_modules'
+                    )
+            elif deps in installed:
+                (path / 'node_modules').symlink_to(installed[deps] / 'node_modules')
+                ref['node_modules'] = f'installed (shared with {installed[deps].name})'
+            else:
+                self.install(ref, path)
+                installed[deps] = path
+                ref['node_modules'] = 'installed'
             bench_dir = path / 'tests/unit/_bench'
             shutil.copytree(COMMON_DIR, bench_dir / '_common', dirs_exist_ok=True)
             for suite in self.suites:
@@ -226,7 +253,19 @@ class Runner:
                 target.mkdir(parents=True, exist_ok=True)
                 for file in suite.files():
                     shutil.copy2(file, target / file.name)
-            self.worktrees[ref['label']] = path
+
+    def install(self, ref: dict, path: Path) -> None:
+        """Install a ref's own node_modules (yarn uses its shared package cache)."""
+        if not shutil.which('yarn'):
+            raise RunError('yarn not found on PATH, needed to install dependencies')
+        self.update_status(current=f"installing dependencies for {ref['label']}")
+        self.log(f"### installing dependencies for {ref['label']} ({datetime.now():%H:%M:%S})")
+        start = time.monotonic()
+        with open(self.log_path, 'ab') as log:
+            code = _run_command(['yarn', 'install', '--immutable'], path, dict(os.environ), log)
+        if code:
+            raise RunError(f"yarn install failed for {ref['label']} (exit {code}), see {self.log_path}")
+        self.log(f'    installed in {time.monotonic() - start:.0f}s')
 
     def cleanup(self) -> None:
         if self.work is None:
@@ -250,6 +289,19 @@ class Runner:
                 return
             time.sleep(5)
         self.log(f'WARNING: could not fully clean up {self.work}')
+
+    def write_config(self) -> None:
+        c = self.config
+        _write_json(self.run_dir / 'config.json', {
+            **asdict(c),
+            'cylc_ui': str(self.repo),
+            'suites': [s.name for s in self.suites],
+            'scales': self.scales,
+            'refs': self.refs,
+            'host': socket.gethostname(),
+            'user': os.environ.get('USER'),
+            'created': self.created,
+        })
 
     # -- logging and status ----------------------------------------------
 
@@ -285,16 +337,8 @@ class Runner:
             for round_ in range(1, c.rounds + 1)
             for ref in (self.refs if round_ % 2 else self.refs[::-1])
         ]
-        _write_json(self.run_dir / 'config.json', {
-            **asdict(c),
-            'cylc_ui': str(self.repo),
-            'suites': [s.name for s in self.suites],
-            'scales': self.scales,
-            'refs': self.refs,
-            'host': socket.gethostname(),
-            'user': os.environ.get('USER'),
-            'created': datetime.now().astimezone().isoformat(timespec='seconds'),
-        })
+        self.created = datetime.now().astimezone().isoformat(timespec='seconds')
+        self.write_config()
         self.update_status(
             state='running', pid=os.getpid(), total=len(jobs), done=0, failed=0,
             current=None, started=datetime.now().astimezone().isoformat(timespec='seconds'),
@@ -308,6 +352,7 @@ class Runner:
         state = 'done'
         try:
             self.create_worktrees()
+            self.write_config()  # with how each ref got its node_modules
             self._run_jobs(jobs)
             if self.status['failed']:
                 state = 'failed'
